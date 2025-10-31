@@ -1,0 +1,70 @@
+import torch
+
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# 超参数设置
+input_dim = 7  # 输入维度（每个球体的参数）
+output_dim = 7  # 输出维度（生成的球体几何结构）
+n_heads = 1
+hidden_dim = 256
+n_layers = 6
+
+# 模型、损失函数和优化器
+model = TransformerModel(input_dim, output_dim, n_heads, hidden_dim, n_layers).to(device)  # 将模型放到GPU上
+criterion = nn.MSELoss()
+optimizer = optim.Adam(model.parameters(), lr=0.001)
+loss_train = []
+
+# 初始化用于保存最佳模型的变量
+best_loss = float('inf')  # 初始化为无穷大
+best_model_path = 'best_transformer_model.pth'  # 模型保存路径
+
+
+# 训练过程
+num_epochs = 1000
+for epoch in range(num_epochs):
+    model.train()
+    total_loss = 0
+
+    for table_tensor, thermal_conductivity_tensor, young_modulus_tensor in data_loader:
+        # 将数据张量放到GPU上
+        table_tensor = table_tensor.to(device)
+        thermal_conductivity_tensor = thermal_conductivity_tensor.to(device)
+        young_modulus_tensor = young_modulus_tensor.to(device)
+
+        optimizer.zero_grad()
+
+
+        # 先将每个标量扩展为 25x7 的矩阵
+        thermal_conductivity_matrix = thermal_conductivity_tensor.unsqueeze(1).unsqueeze(2).repeat(1, 50, 7)  # 形状为 (16, 25, 7)
+        #young_modulus_matrix = young_modulus_tensor.unsqueeze(1).unsqueeze(2).repeat(1, 50, 7)  # 形状为 (16, 25, 7)
+        
+        # 将两个矩阵沿着行方向拼接，形成 (16, 50, 7) 的矩阵
+        src = thermal_conductivity_matrix
+        
+        tgt = table_tensor  # 解码器的输入为表格数据
+
+        # 前向传播
+        outputs = model(src, tgt)  # 模型已经在GPU上，不需要额外转置
+
+        # 计算损失
+        loss = criterion(outputs, tgt)
+        loss.backward()
+        optimizer.step()
+
+        total_loss += loss.item()
+
+    avg_loss = total_loss / len(data_loader)
+    loss_train.append(avg_loss)
+    print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {avg_loss:.4f}')
+
+    # 如果当前的损失低于最佳损失，保存模型
+    if avg_loss < best_loss and avg_loss<1:
+        best_loss = avg_loss
+        torch.save(model.state_dict(), best_model_path)  # 保存当前的最佳模型
+        print(f'New best model saved at epoch {epoch+1} with loss: {best_loss:.4f}')
+
+
+
+
