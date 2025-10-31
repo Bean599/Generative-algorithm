@@ -1,0 +1,74 @@
+thermal_conductivity_tensor = torch.tensor([10]).to(device)
+young_modulus_tensor = torch.tensor([1]).to(device)
+optimizer.zero_grad()
+# 先将每个标量扩展为 25x7 的矩阵
+#thermal_conductivity_matrix = thermal_conductivity_tensor.unsqueeze(1).unsqueeze(2).repeat(1, 50, 7)  # 形状为 (16, 25, 7)
+young_modulus_matrix = young_modulus_tensor.unsqueeze(1).unsqueeze(2).repeat(1, 100, 7)  # 形状为 (16, 25, 7)
+src = young_modulus_matrix.float()
+
+#掩码矩阵
+def generate_square_subsequent_mask(sz):
+    """
+    动态生成前瞻掩码矩阵。
+    :param sz: 输入序列的长度
+    :return: sz * sz 的掩码矩阵
+    """
+    mask = torch.triu(torch.ones(sz, sz), diagonal=1)  # 上三角矩阵
+    mask = mask.masked_fill(mask == 1, float('-inf'))  # 上三角的部分填充为 -inf
+    return mask
+
+
+
+def check_overlap(vector, matrix):
+    """
+    判断一个球体（向量表示）是否与矩阵中的球体重叠
+    """
+    x_v, y_v, z_v, r_v = vector[:4]  # 从向量中提取 x, y, z, r
+    x_m, y_m, z_m, r_m = matrix[:, 0], matrix[:, 1], matrix[:, 2], matrix[:, 3]  # 从矩阵中提取 x, y, z, r
+    
+    # 计算距离
+    distances = np.sqrt((x_v - x_m)**2 + (y_v - y_m)**2 + (z_v - z_m)**2)
+    overlap = distances < (r_v + r_m)
+    
+    return np.any(overlap)
+
+
+#生成新的RVE模型
+
+from tqdm import tqdm
+
+young_modulus_tensor = torch.tensor([2]).to(device)
+young_modulus_matrix = young_modulus_tensor.unsqueeze(1).unsqueeze(2).repeat(1, 50, 7)  # 形状为 (16, 25, 7)
+src = young_modulus_matrix.float()
+max_len = 3000
+tgt = torch.tensor([[[0, 0, 0, 3, 130, 170, 0.28],[10,10,0,5,33,390,0.23],[10,10,10,5,33,390,0.23]]], dtype=torch.float32).to(device)
+#tgt=train_list_TC[0][:50].unsqueeze(0).to(device)
+#tgt = data_tensor.unsqueeze(0).to(device)
+generate_seq = []
+model.train()
+stop_count = 0   #停止标记次数
+for i in tqdm(range(max_len)): 
+    for j in range(1000):
+        tgt_mask = generate_square_subsequent_mask(tgt.size(1)).to(device)  # 生成掩码并传到 GPU
+        
+        # 模型前向传播
+        p = model(src, tgt, tgt_mask=tgt_mask)
+        p = p[:, -1, :].unsqueeze(1)  # 取出生成的最新球体
+        # 将生成的球体与已有球体进行重叠检测
+        p_vector = p[0, 0, :5].to('cpu').detach().numpy()  # 取生成的球体的前4个值 (x, y, z, r)
+        tgt_matrix = tgt[0, :, :4].to('cpu').detach().numpy()  # 取已有球体序列的前4个值
+        if p_vector[3] < 1:  # r 值
+            stop_count += 1  # 增加停止标记计数
+            print('停止标记'+str(stop_count)+'次')
+        # 检测新生成的球体是否与已有球体重叠
+        if check_overlap(p_vector, tgt_matrix) == False and all(0 <= coord <= 50 for coord in p_vector[:3]) and p_vector[4]>1:
+            # 如果不重叠，将生成的球体拼接到目标序列中
+            tgt = torch.cat((tgt, p), dim=1)
+            generate_seq.append(p)
+        del p, tgt_mask
+        #    break
+        #else:
+        #    print('第'+str(i)+'个球重叠'+str(j)+'次')
+    if stop_count>5:
+        print('标记停止')
+        break
